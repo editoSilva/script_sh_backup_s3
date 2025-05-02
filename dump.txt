@@ -1,0 +1,60 @@
+#!/bin/bash
+set -euo pipefail
+
+# === CONFIGURAÇÕES AWS ===
+export AWS_ACCESS_KEY_ID=""
+export AWS_SECRET_ACCESS_KEY=""
+export AWS_DEFAULT_REGION="us-east-1"
+
+# === CONFIGURAÇÕES DO DUMP ===
+DB_NAME="zyonbank"
+BUCKET_NAME="systechtecnologia"
+S3_PATH="backups/gateway"
+DUMP_DIR="/tmp"
+DATE=$(date +"%Y-%m-%d_%H-%M-%S")
+DUMP_FILE="$DUMP_DIR/${DB_NAME}-${DATE}.sql"
+GZ_FILE="${DUMP_FILE}.gz"
+
+echo "📅 Início do backup em: $DATE"
+
+# === PASSO 1: Criar dump ===
+echo "🔄 Criando dump do banco '$DB_NAME'..."
+if mysqldump --databases "$DB_NAME" > "$DUMP_FILE"; then
+  echo "✅ Dump criado em: $DUMP_FILE"
+else
+  echo "❌ Erro ao criar dump. Abortando."
+  exit 1
+fi
+
+# === PASSO 2: Compactar ===
+echo "📦 Compactando com gzip..."
+if gzip "$DUMP_FILE"; then
+  echo "✅ Compactação concluída: $GZ_FILE"
+else
+  echo "❌ Falha ao compactar. Abortando."
+  exit 1
+fi
+
+# === PASSO 3: Verificar existência do arquivo ===
+if [ ! -f "$GZ_FILE" ]; then
+  echo "❌ Arquivo compactado não encontrado."
+  exit 1
+fi
+
+# === PASSO 4: Enviar para S3 com permissão pública ===
+echo "☁️ Enviando para S3 com permissão pública..."
+if aws s3 cp "$GZ_FILE" "s3://$BUCKET_NAME/$S3_PATH/" --acl public-read; then
+  echo "✅ Upload feito com sucesso!"
+  S3_URL="https://$BUCKET_NAME.s3.amazonaws.com/$S3_PATH/$(basename "$GZ_FILE")"
+  echo "🌍 Arquivo disponível publicamente em:"
+  echo "$S3_URL"
+else
+  echo "❌ Erro no upload para o S3."
+  exit 1
+fi
+
+# === PASSO 5: Limpeza ===
+echo "🧹 Removendo arquivo local..."
+rm -f "$GZ_FILE"
+
+echo "✅ Backup finalizado em $(date +"%Y-%m-%d %H:%M:%S")"
